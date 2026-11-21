@@ -61,11 +61,43 @@ Sans clé, l'appli fonctionne en **mode démo** : elle met seulement les notes e
 
 ## Où sont les données ?
 
-Tout est dans le dossier `donnees`, à côté de `app.py` :
-- `appli_cr.db` : la base (comptes, chantiers, liste des CR) ;
-- `fichiers/chantier_X/CR_113.docx` : les fichiers Word, un dossier par chantier.
+L'appli fonctionne de deux façons :
+- **Avec Supabase** (recommandé, en ligne) : la base et les fichiers Word sont enregistrés sur Supabase et **conservés** même quand l'appli redémarre. La barre latérale affiche « ☁️ Données enregistrées sur Supabase ».
+- **Sans Supabase** (test sur un ordinateur) : tout est rangé dans le dossier `donnees`, à côté de `app.py`.
 
 **Faites une sauvegarde régulière** (Administration › Sauvegarde) et gardez-la sur un autre support.
+
+## Brancher Supabase (depuis un iPad ou un ordinateur)
+
+### 1. Créer le projet Supabase
+1. Allez sur **supabase.com** → « Start your project » → connectez-vous avec GitHub.
+2. « New project » :
+   - **Name** : cr-mh2o
+   - **Database password** : un mot de passe avec **uniquement des lettres et des chiffres** (pas de @ : / # ? %). **Notez-le.**
+   - **Region** : une région en **Europe** (Paris ou Francfort).
+   - Offre gratuite (Free).
+3. Créez le projet et attendez 1 à 2 minutes.
+
+### 2. Récupérer les 3 informations
+- **Adresse du projet** : Project Settings › Data API (ou API) → l'URL du type `https://xxxx.supabase.co`.
+- **Clé secrète** : Project Settings › API Keys → section « Secret keys » → copier la clé `sb_secret_…`.
+- **Adresse de la base** : bouton **Connect** en haut de la page → choisir **Session pooler** → copier l'adresse qui commence par `postgresql://postgres.xxxx:[YOUR-PASSWORD]@…pooler.supabase.com:5432/postgres`, puis remplacer `[YOUR-PASSWORD]` (crochets compris) par votre mot de passe.
+
+### 3. Les coller dans Streamlit
+Sur share.streamlit.io → à côté de l'appli, menu « ⋮ » → **Settings** → **Secrets**, collez :
+```
+SUPABASE_URL = "https://xxxx.supabase.co"
+SUPABASE_SECRET_KEY = "sb_secret_xxxx"
+SUPABASE_DB_URL = "postgresql://postgres.xxxx:MOTDEPASSE@aws-x-xx.pooler.supabase.com:5432/postgres"
+```
+Enregistrez : l'appli redémarre. Au premier lancement, elle crée seule les tables et le compartiment de fichiers (privé).
+
+⚠️ Ces informations donnent accès à toutes les données : ne les mettez **jamais** dans GitHub, ni dans un mail.
+
+### Sécurité
+- Les mots de passe des utilisateurs sont stockés sous forme d'empreinte (jamais en clair).
+- Les tables sont protégées (Row Level Security) : elles ne sont pas lisibles via l'API publique de Supabase.
+- Les fichiers Word sont dans un compartiment **privé**.
 
 ## Utiliser l'appli à plusieurs
 
@@ -91,6 +123,6 @@ Cette décision est à valider avec la direction et l'informatique, car elle con
 | `db.py` | La base de données (utilisateurs, chantiers, accès, CR) |
 | `word.py` | Lecture du CR précédent et génération du nouveau Word |
 | `ia.py` | La reformulation par l'IA (consignes de rédaction incluses) |
-| `stockage.py` | Le rangement des fichiers par chantier et la sauvegarde |
+| `stockage.py` | Le rangement des fichiers par chantier (Supabase ou local) et la sauvegarde |
 | `auth.py` | La sécurité des mots de passe |
-| `config.py` | Les réglages (dossier des données, modèle d'IA, couleur des ajouts) |
+| `config.py` | Les réglages (modèle d'IA, couleur des ajouts) et la lecture des secrets |

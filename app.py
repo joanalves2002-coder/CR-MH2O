@@ -1,10 +1,9 @@
 """Appli « MH2O · Comptes rendus » — lancer avec :  streamlit run app.py"""
-import os
-import tempfile
 from datetime import date
 
 import streamlit as st
 
+import config
 import db
 import ia
 import stockage
@@ -12,7 +11,27 @@ import word
 from config import COULEUR_NOUVEAUX_POINTS, NOM_APPLI
 
 st.set_page_config(page_title=NOM_APPLI, page_icon="📋", layout="wide")
-db.initialiser()
+
+
+@st.cache_resource
+def demarrage():
+    """Crée les tables et le compartiment de fichiers au premier lancement (une seule fois)."""
+    db.initialiser()
+    stockage.initialiser()
+    return True
+
+
+try:
+    demarrage()
+except Exception as erreur:
+    st.error("Connexion au stockage impossible. Vérifiez les Secrets (SUPABASE_DB_URL, SUPABASE_URL, "
+             f"SUPABASE_SECRET_KEY).\n\nDétail : {erreur}")
+    st.stop()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fichier(cle):
+    return stockage.lire(cle)
 
 st.markdown(
     """
@@ -127,6 +146,10 @@ with st.sidebar:
         for cle in list(etat.keys()):
             del etat[cle]
         st.rerun()
+    if config.mode_supabase():
+        st.caption("☁️ Données enregistrées sur Supabase.")
+    else:
+        st.caption("💾 Mode local : données enregistrées sur cet appareil uniquement.")
     if ia.mode_demo():
         st.caption("⚠️ Mode démo : aucune clé d'API IA configurée, la reformulation est simplifiée.")
 
@@ -189,12 +212,12 @@ def page_chantier():
                 c2.write(date_fr(cr["date_reunion"]))
                 c3.markdown(f"{cr['auteur'] or '—'}<br>{badge(cr['statut'])}", unsafe_allow_html=True)
                 with c4:
-                    if os.path.exists(cr["fichier"]):
-                        st.download_button("Télécharger (Word)", stockage.lire(cr["fichier"]),
+                    try:
+                        st.download_button("Télécharger (Word)", fichier(cr["fichier"]),
                                            file_name=f"{c['nom']}_CR_{cr['numero']:03d}.docx",
                                            key=f"dl_{cr['id']}", use_container_width=True)
-                    else:
-                        st.warning("Fichier manquant")
+                    except Exception:
+                        st.warning("Fichier introuvable")
                     if droit == "redaction":
                         if cr["statut"] == "Brouillon" and st.button("Valider", key=f"val_{cr['id']}", use_container_width=True):
                             db.changer_statut_cr(cr["id"], "Validé")
@@ -219,25 +242,25 @@ def page_chantier():
             st.caption("Importez un CR Word déjà rédigé (par exemple le dernier CR envoyé). "
                        "L'appli s'en servira comme base pour le CR suivant.")
             with st.form("import_cr", clear_on_submit=True):
-                fichier = st.file_uploader("Fichier Word (.docx)", type=["docx"])
+                televerse = st.file_uploader("Fichier Word (.docx)", type=["docx"])
                 numero = st.number_input("Numéro du CR", min_value=1, step=1,
                                          value=(crs[0]["numero"] + 1) if crs else 1)
                 date_reu = st.date_input("Date de la réunion", value=date.today(), format="DD/MM/YYYY")
                 statut = st.selectbox("Statut", ["Diffusé", "Validé", "Brouillon"])
                 if st.form_submit_button("Importer", type="primary"):
-                    if not fichier:
+                    if not televerse:
                         st.error("Choisissez un fichier .docx.")
                     elif any(x["numero"] == numero for x in crs):
                         st.error(f"Le CR n°{numero} existe déjà pour ce chantier.")
                     else:
-                        chemin = stockage.enregistrer_televersement(cid, int(numero), fichier.getvalue())
+                        contenu = televerse.getvalue()
                         try:
-                            texte = word.extraire_texte(chemin)
+                            texte = word.extraire_texte(contenu)
                         except Exception:
-                            stockage.supprimer(chemin)
                             st.error("Ce fichier Word n'a pas pu être lu. Vérifiez qu'il s'agit bien d'un .docx.")
                         else:
-                            db.ajouter_cr(cid, int(numero), date_reu.isoformat(), utilisateur["id"], statut, chemin, texte)
+                            cle = stockage.enregistrer(cid, int(numero), contenu)
+                            db.ajouter_cr(cid, int(numero), date_reu.isoformat(), utilisateur["id"], statut, cle, texte)
                             st.success(f"CR n°{numero} importé.")
                             st.rerun()
 
@@ -260,7 +283,8 @@ def page_nouveau_cr():
     st.caption(f"Basé sur le CR n°{base['numero']} · trame Word conservée")
 
     try:
-        sections = word.lister_sections(base["fichier"])
+        contenu_base = fichier(base["fichier"])
+        sections = word.lister_sections(contenu_base)
     except Exception as e:
         st.error(f"Impossible de lire le CR n°{base['numero']} : {e}")
         return
@@ -319,17 +343,17 @@ def page_nouveau_cr():
                 st.rerun()
 
     if st.button(f"Générer le CR n°{numero}", type="primary", disabled=not etat.ajouts):
-        sortie = stockage.chemin_cr(cid, numero)
-        bilan = word.generer_cr(base["fichier"], sortie, etat.ajouts, base["numero"], numero,
-                                couleur=COULEUR_NOUVEAUX_POINTS)
-        db.ajouter_cr(cid, numero, date_reu.isoformat(), utilisateur["id"], "Brouillon", sortie,
-                      word.extraire_texte(sortie))
+        nouveau, bilan = word.generer_cr(contenu_base, etat.ajouts, base["numero"], numero,
+                                         couleur=COULEUR_NOUVEAUX_POINTS)
+        cle = stockage.enregistrer(cid, numero, nouveau)
+        db.ajouter_cr(cid, numero, date_reu.isoformat(), utilisateur["id"], "Brouillon", cle,
+                      word.extraire_texte(nouveau))
         etat.ajouts = []
         st.success(f"CR n°{numero} enregistré en brouillon : {bilan['points_ajoutes']} point(s) ajouté(s), "
                    f"numéro mis à jour à {bilan['numeros_remplaces']} endroit(s).")
         if bilan["numeros_remplaces"] == 0:
             st.info("Le numéro du CR n'a pas été trouvé dans le document : pensez à le modifier à la main.")
-        st.download_button("Télécharger le CR (Word)", stockage.lire(sortie),
+        st.download_button("Télécharger le CR (Word)", nouveau,
                            file_name=f"{c['nom']}_CR_{numero:03d}.docx")
         st.caption("Relisez-le dans Word (dates, présents, planning), puis validez-le depuis la page du chantier.")
 
@@ -447,10 +471,10 @@ def page_admin():
         st.caption("Téléchargez une copie complète (base + tous les fichiers Word). "
                    "À faire régulièrement et à conserver sur un autre support.")
         if st.button("Préparer la sauvegarde"):
-            dossier = tempfile.mkdtemp()
-            chemin = stockage.sauvegarder_tout(os.path.join(dossier, f"sauvegarde_CR_{date.today().isoformat()}"))
-            st.download_button("Télécharger la sauvegarde (.zip)", stockage.lire(chemin),
-                               file_name=os.path.basename(chemin))
+            with st.spinner("Préparation…"):
+                contenu_zip = stockage.sauvegarde_zip(db.exporter_tout())
+            st.download_button("Télécharger la sauvegarde (.zip)", contenu_zip,
+                               file_name=f"sauvegarde_CR_{date.today().isoformat()}.zip")
 
 
 PAGES = {

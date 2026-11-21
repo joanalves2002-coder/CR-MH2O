@@ -5,6 +5,7 @@ Principe : le nouveau CR est une copie du CR précédent, dans laquelle on
 2) ajoute les nouveaux points à la fin de la section choisie.
 La mise en page, les en-têtes et les tableaux existants sont conservés.
 """
+import io
 import re
 
 from docx import Document
@@ -14,6 +15,13 @@ from docx.shared import RGBColor
 from docx.text.paragraph import Paragraph
 
 LONGUEUR_MAX_TITRE = 120
+
+
+def _ouvrir(source):
+    """source = contenu du fichier (bytes) ou chemin."""
+    if isinstance(source, (bytes, bytearray)):
+        return Document(io.BytesIO(source))
+    return Document(source)
 
 
 def _est_titre(paragraphe: Paragraph) -> bool:
@@ -41,18 +49,18 @@ def _titres(doc):
     return [p for p in doc.paragraphs if _est_titre(p)]
 
 
-def lister_sections(chemin):
+def lister_sections(source):
     """Sections disponibles pour insérer des points : [{'index', 'titre', 'niveau'}]."""
-    doc = Document(chemin)
+    doc = _ouvrir(source)
     return [
         {"index": i, "titre": p.text.strip(), "niveau": _niveau(p)}
         for i, p in enumerate(_titres(doc))
     ]
 
 
-def extraire_texte(chemin):
+def extraire_texte(source):
     """Tout le texte du CR (paragraphes + tableaux), pour la recherche."""
-    doc = Document(chemin)
+    doc = _ouvrir(source)
     morceaux = [p.text for p in doc.paragraphs]
     for table in doc.tables:
         for ligne in table.rows:
@@ -138,13 +146,13 @@ def _style_paragraphe_section(titre: Paragraph, corps):
     return None
 
 
-def generer_cr(chemin_base, chemin_sortie, ajouts, ancien_numero, nouveau_numero, couleur=None):
-    """Crée le nouveau CR.
+def generer_cr(base, ajouts, ancien_numero, nouveau_numero, couleur=None):
+    """Crée le nouveau CR à partir du précédent (base = contenu du fichier Word).
 
     ajouts : liste de {'section_index': int, 'textes': [str, ...]}
-    Renvoie un petit bilan {'numeros_remplaces': int, 'points_ajoutes': int}.
+    Renvoie (contenu du nouveau fichier, bilan {'numeros_remplaces', 'points_ajoutes'}).
     """
-    doc = Document(chemin_base)
+    doc = _ouvrir(base)
     titres = _titres(doc)
 
     points = 0
@@ -171,5 +179,6 @@ def generer_cr(chemin_base, chemin_sortie, ajouts, ancien_numero, nouveau_numero
     if ancien_numero is not None:
         remplaces = mettre_a_jour_numero(doc, ancien_numero, nouveau_numero)
 
-    doc.save(chemin_sortie)
-    return {"numeros_remplaces": remplaces, "points_ajoutes": points}
+    sortie = io.BytesIO()
+    doc.save(sortie)
+    return sortie.getvalue(), {"numeros_remplaces": remplaces, "points_ajoutes": points}

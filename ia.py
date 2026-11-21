@@ -3,8 +3,7 @@
 Sans clé d'API, l'appli fonctionne en « mode démo » : elle remet seulement
 les notes en forme (majuscule, point final), sans IA.
 """
-import os
-
+import config
 from config import MODELE_IA
 
 CONSIGNES = """Tu es rédacteur de comptes rendus de réunion de chantier pour MH2O, \
@@ -23,15 +22,7 @@ Réponds uniquement avec la liste des points, un par ligne, sans puces ni numér
 
 
 def cle_api():
-    cle = os.environ.get("ANTHROPIC_API_KEY")
-    if cle:
-        return cle
-    try:
-        import streamlit as st
-
-        return st.secrets.get("ANTHROPIC_API_KEY")
-    except Exception:
-        return None
+    return config.secret("ANTHROPIC_API_KEY")
 
 
 def mode_demo():
